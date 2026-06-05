@@ -1,0 +1,16 @@
+{
+  "name": "kalshi-bot",
+  "version": "1.0.0",
+  "description": "Kalshi prediction markets trading bot with AI",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": ["kalshi", "trading", "bot", "prediction-markets"],
+  "author": "",
+  "license": "MIT"
+}
