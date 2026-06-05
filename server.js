@@ -1108,8 +1108,8 @@ addLog('INFO','INFO','Motor IA: Groq Llama 3.3 (GRATIS) · Datos: FRED + CoinGec
 
 const server = http.createServer(async (req, res) => {
   setCORS(res);
-  const parsed   = url.parse(req.url);
-  const pathname = parsed.pathname || '/';
+  const reqUrl   = new URL(req.url, 'http://localhost');
+  const pathname = reqUrl.pathname || '/';
 
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
@@ -1180,13 +1180,13 @@ const server = http.createServer(async (req, res) => {
 
   // ── Proxy → Kalshi ──────────────────────────────────────
   if (pathname.startsWith('/kalshi/')) {
-    const kPath = pathname.replace('/kalshi', '') + (parsed.search || '');
+    const kPath = pathname.replace('/kalshi', '') + (reqUrl.search || '');
     await proxyTo('trading-api.kalshi.com', kPath, req, res); return;
   }
 
   // ── Proxy → Anthropic ───────────────────────────────────
   if (pathname.startsWith('/anthropic/')) {
-    const aPath = pathname.replace('/anthropic', '') + (parsed.search || '');
+    const aPath = pathname.replace('/anthropic', '') + (reqUrl.search || '');
     await proxyTo('api.groq.com', aPath, req, res); return;
   }
 
