@@ -227,22 +227,39 @@ Compara con el precio de mercado de ${market.marketPrice}% para identificar si h
 // ── 4. Obtener mercados reales de Kalshi ─────────────────────
 
 async function fetchKalshiMarkets(kalshiKey) {
-  try {
-    const headers = kalshiKey ? { 'Authorization': 'Bearer ' + kalshiKey } : {};
-    const r = await httpsGet('trading-api.kalshi.com',
-      '/trade-api/v2/markets?limit=20&status=open', headers);
-    const d = JSON.parse(r.body);
-    if (d.markets && d.markets.length > 0) {
-      return d.markets.map(m => ({
-        id         : m.ticker,
-        question   : m.title,
-        marketPrice: m.yes_bid || m.last_price || 50,
-        category   : m.category || 'general',
-        expiry     : m.close_time ? new Date(m.close_time).toLocaleDateString() : 'N/A',
-        volume     : m.volume || 0,
-      }));
+  if (kalshiKey) {
+    try {
+      // Kalshi v2 API — try both auth formats
+      const headers = {
+        'Authorization': 'Bearer ' + kalshiKey,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      };
+      const r = await httpsGet('trading-api.kalshi.com',
+        '/trade-api/v2/markets?limit=20&status=open', headers);
+      console.log('[KALSHI] status:', r.status, r.body.slice(0,200));
+      if (r.status === 200) {
+        const d = JSON.parse(r.body);
+        if (d.markets && d.markets.length > 0) {
+          console.log('[KALSHI] got', d.markets.length, 'markets');
+          return d.markets.map(m => ({
+            id         : m.ticker,
+            question   : m.title,
+            marketPrice: Math.round((m.yes_ask || m.yes_bid || m.last_price || 50)),
+            category   : m.category || 'general',
+            expiry     : m.close_time ? new Date(m.close_time).toLocaleDateString() : 'N/A',
+            volume     : m.volume || 0,
+          }));
+        }
+      } else {
+        console.log('[KALSHI] auth failed, status', r.status, '— using demo markets');
+      }
+    } catch (e) {
+      console.log('[KALSHI] error:', e.message, '— using demo markets');
     }
-  } catch (e) { /* cae a mercados demo */ }
+  } else {
+    console.log('[KALSHI] no key provided — using demo markets');
+  }
 
   // Mercados demo si no hay key o falla la API
   return [
@@ -658,12 +675,37 @@ var S = {
 };
 
 // ══ KEYS ═══════════════════════════════════════════════════
-function saveKeys() {
+async function saveKeys() {
   S.keys.kalshi    = document.getElementById('kalshi-key').value.trim();
   S.keys.anthropic = document.getElementById('anthropic-key').value.trim();
-  if (!S.keys.anthropic) { toast('⚠️ Anthropic key requerida para predicciones IA', 'var(--amber)'); return; }
-  addLog('INFO','CFG','Keys guardadas. Listo para escanear.');
-  toast('✓ Keys guardadas', 'var(--green)');
+  if (!S.keys.anthropic) { toast('⚠️ Groq API Key requerida', 'var(--amber)'); return; }
+
+  addLog('INFO','CFG','Probando conexiones...');
+
+  // Test Kalshi
+  try {
+    const r = await fetch('/kalshi-test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kalshiKey: S.keys.kalshi })
+    });
+    const d = await r.json();
+    if (d.ok) {
+      addLog('TRADE','KALSHI','✓ Conectado — ' + d.markets + ' mercados en vivo');
+      toast('✓ Kalshi conectado — ' + d.markets + ' mercados', 'var(--green)');
+      S.kalshiMode = 'live';
+    } else {
+      addLog('WARN','KALSHI', d.error ? 'Error: ' + d.error + ' — modo demo' : 'Sin key — modo demo');
+      toast('Kalshi: modo demo (sin key válida)', 'var(--amber)');
+      S.kalshiMode = 'demo';
+    }
+  } catch(e) {
+    addLog('WARN','KALSHI','Error de conexión: ' + e.message);
+    S.kalshiMode = 'demo';
+  }
+
+  addLog('AI','GROQ','Groq API key guardada ✓');
+  toast('✓ Listo — toca ESCANEAR', 'var(--green)');
 }
 
 // ══ SCAN — llama al endpoint /predict del servidor ═════════
@@ -1075,6 +1117,36 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/' || pathname === '/index.html') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(BOT_HTML); return;
+  }
+
+  // ── Kalshi connection test ──────────────────────────────
+  if (pathname === '/kalshi-test' && req.method === 'POST') {
+    const body = await readBody(req);
+    let params = {};
+    try { params = JSON.parse(body.toString()); } catch(e) {}
+    const key = params.kalshiKey || process.env.KALSHI_API_KEY || '';
+    if (!key) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'No Kalshi key provided', mode: 'demo' }));
+      return;
+    }
+    try {
+      const r = await httpsGet('trading-api.kalshi.com',
+        '/trade-api/v2/markets?limit=5&status=open',
+        { 'Authorization': 'Bearer ' + key, 'Accept': 'application/json' }
+      );
+      const d = JSON.parse(r.body);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      if (r.status === 200 && d.markets) {
+        res.end(JSON.stringify({ ok: true, status: r.status, markets: d.markets.length, mode: 'live' }));
+      } else {
+        res.end(JSON.stringify({ ok: false, status: r.status, error: d.error || d.message || 'Auth failed', mode: 'demo' }));
+      }
+    } catch(e) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: e.message, mode: 'demo' }));
+    }
+    return;
   }
 
   // ── Health ──────────────────────────────────────────────
